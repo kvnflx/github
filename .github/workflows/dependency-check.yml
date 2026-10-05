@@ -41,6 +41,12 @@ on:
         description: SARIF in GitHub Code Scanning hochladen. Braucht security-events:write und bei privaten Repos GitHub Advanced Security.
         type: boolean
         default: false
+      nvd-datafeed:
+        description: >-
+          NVD-Daten aus einem Feed statt der gedrosselten NVD-API laden. Standard ist der täglich
+          aktualisierte Mirror des Dependency-Check-Projekts. Leer = NVD-API mit NVD_API_KEY.
+        type: string
+        default: "https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/nvdcve-{0}.json.gz"
       extra-args:
         description: Weitere CLI-Argumente für dependency-check.sh.
         type: string
@@ -127,6 +133,7 @@ jobs:
           ENABLE_EXPERIMENTAL: ${{ inputs.enable-experimental }}
           SKIP_DEV: ${{ inputs.skip-dev-dependencies }}
           EXTRA_ARGS: ${{ inputs.extra-args }}
+          NVD_DATAFEED: ${{ inputs.nvd-datafeed }}
           PROJECT: ${{ github.repository }}
         run: |
           args=(
@@ -142,7 +149,9 @@ jobs:
             [ -n "$pattern" ] && args+=(--exclude "$pattern")
           done <<< "$EXCLUDE"
 
-          if [ -n "$NVD_API_KEY" ]; then
+          if [ -n "$NVD_DATAFEED" ]; then
+            args+=(--nvdDatafeed "$NVD_DATAFEED")
+          elif [ -n "$NVD_API_KEY" ]; then
             args+=(--nvdApiKey "$NVD_API_KEY")
           else
             echo "::warning title=Kein NVD API Key::Secret NVD_API_KEY fehlt. Das NVD-Update läuft stark gedrosselt."

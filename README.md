@@ -30,7 +30,7 @@ Damit ein Merge bei Funden blockiert wird, in den Branch-Protection-Regeln des P
 
 | Secret | Pflicht | Woher |
 |---|---|---|
-| `NVD_API_KEY` | dringend empfohlen | kostenlos unter https://nvd.nist.gov/developers/request-an-api-key. Ohne Key ist das NVD-Update stark gedrosselt, der erste Lauf kann sehr lange dauern. |
+| `NVD_API_KEY` | optional | Nur nötig, wenn `nvd-datafeed` leer ist und direkt die NVD-API benutzt wird. Kostenlos unter https://nvd.nist.gov/developers/request-an-api-key. |
 | `SONAR_TOKEN` | für Sonar | SonarQube Cloud: My Account > Security. Server: User > My Account > Security. Ohne Token wird der Sonar-Job mit Warnung übersprungen. |
 | `OSS_INDEX_TOKEN` | optional | Sonatype Guide Personal Access Token. Ohne Token ist der OSS Index Analyzer aus. |
 
@@ -47,6 +47,7 @@ Die Secrets müssen im jeweiligen Projekt-Repo hinterlegt sein. Auf einem Person
 | `enable-experimental` | `true` | Experimentelle Analyzer, nötig u. a. für Python `requirements.txt` und Go |
 | `skip-dev-dependencies` | `false` | devDependencies bei npm, yarn, pnpm ignorieren |
 | `upload-sarif` | `false` | Funde im Security-Tab. Braucht `security-events: write` im Aufrufer und bei privaten Repos GitHub Advanced Security |
+| `nvd-datafeed` | Mirror des Dependency-Check-Projekts | NVD-Daten als Feed, täglich aktualisiert, schnell und ohne Rate-Limit. Leer = NVD-API mit `NVD_API_KEY` (erster Lauf dauert dann über eine Stunde) |
 | `extra-args` | leer | Weitere CLI-Argumente |
 | `dc-version`, `dc-sha256` | `12.2.2` | CLI-Version mit gepinnter Prüfsumme. 13.0.0 bricht ohne NVD API Key ab (Issue #8715), Update sobald 13.0.1 erscheint |
 
