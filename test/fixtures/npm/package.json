@@ -1,0 +1,9 @@
+{
+  "name": "dependency-check-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Absichtlich veraltete Abhängigkeit für den Selbsttest von dependency-check.yml",
+  "dependencies": {
+    "lodash": "4.17.20"
+  }
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Vorlage für False Positives. Als dependency-check-suppressions.xml ins Root
+  des Projekt-Repos legen, der Workflow findet die Datei automatisch.
+  Jede Unterdrückung braucht eine Begründung in <notes>.
+-->
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.4.xsd">
+  <!--
+  <suppress until="2027-01-01Z">
+    <notes>CVE betrifft nur die Server-Komponente, wir nutzen nur den Client.</notes>
+    <packageUrl regex="true">^pkg:npm/beispiel@.*$</packageUrl>
+    <cve>CVE-2026-00000</cve>
+  </suppress>
+  -->
+</suppressions>

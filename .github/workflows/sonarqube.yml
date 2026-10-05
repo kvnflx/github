@@ -1,0 +1,139 @@
+# Wiederverwendbarer SonarQube-Scan (SonarQube Cloud oder selbst gehosteter Server).
+#
+# Ohne SONAR_TOKEN wird der Job mit einer Warnung übersprungen, damit Repos den
+# Workflow schon einbinden können, bevor Sonar eingerichtet ist.
+# Mit Token wird das Quality Gate abgewartet und ein rotes Gate lässt den Build scheitern.
+
+name: SonarQube
+
+on:
+  workflow_call:
+    inputs:
+      host-url:
+        description: URL des SonarQube Servers. Leer lassen für SonarQube Cloud.
+        type: string
+        default: ""
+      organization:
+        description: Organisation in SonarQube Cloud. Leer = GitHub-Owner (nur Cloud, nur ohne sonar-project.properties).
+        type: string
+        default: ""
+      project-key:
+        description: Projektschlüssel. Leer = sonar-project.properties oder <owner>_<repo>.
+        type: string
+        default: ""
+      project-base-dir:
+        description: Basisverzeichnis der Analyse.
+        type: string
+        default: "."
+      args:
+        description: Zusätzliche Scanner-Argumente, z. B. "-Dsonar.sources=src -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info".
+        type: string
+        default: ""
+      coverage-artifact:
+        description: Name eines Artefakts aus einem vorherigen Job (z. B. Coverage-Reports), das vor dem Scan ins Repo entpackt wird.
+        type: string
+        default: ""
+      quality-gate:
+        description: Quality Gate abwarten und Build bei rotem Gate scheitern lassen.
+        type: boolean
+        default: true
+      quality-gate-timeout:
+        description: Maximale Wartezeit auf das Quality Gate in Sekunden.
+        type: number
+        default: 300
+    secrets:
+      SONAR_TOKEN:
+        description: Analyse-Token aus SonarQube.
+        required: false
+
+jobs:
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Token prüfen
+        id: token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::warning title=SonarQube übersprungen::Secret SONAR_TOKEN fehlt. Scan wird übersprungen, bis es im Repo hinterlegt ist."
+            echo "### SonarQube übersprungen" >> "$GITHUB_STEP_SUMMARY"
+            echo "Secret \`SONAR_TOKEN\` ist nicht gesetzt." >> "$GITHUB_STEP_SUMMARY"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.token.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Volle Historie für Blame-Daten und die Erkennung neuer Issues
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Coverage-Artefakt laden
+        if: steps.token.outputs.enabled == 'true' && inputs.coverage-artifact != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.coverage-artifact }}
+          path: ${{ inputs.project-base-dir }}
+
+      - name: Scanner-Argumente zusammenstellen
+        if: steps.token.outputs.enabled == 'true'
+        id: args
+        env:
+          HOST_URL: ${{ inputs.host-url }}
+          ORGANIZATION: ${{ inputs.organization }}
+          PROJECT_KEY: ${{ inputs.project-key }}
+          BASE_DIR: ${{ inputs.project-base-dir }}
+          EXTRA_ARGS: ${{ inputs.args }}
+          QUALITY_GATE: ${{ inputs.quality-gate }}
+          QUALITY_GATE_TIMEOUT: ${{ inputs.quality-gate-timeout }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          args=()
+          props="$BASE_DIR/sonar-project.properties"
+
+          if [ -n "$HOST_URL" ]; then
+            args+=("-Dsonar.host.url=$HOST_URL")
+          fi
+
+          if [ -n "$PROJECT_KEY" ]; then
+            args+=("-Dsonar.projectKey=$PROJECT_KEY")
+          elif [ ! -f "$props" ]; then
+            # Standardschlüssel beim Import aus GitHub in SonarQube Cloud
+            args+=("-Dsonar.projectKey=${OWNER}_${REPO}")
+          fi
+
+          if [ -z "$HOST_URL" ]; then
+            if [ -n "$ORGANIZATION" ]; then
+              args+=("-Dsonar.organization=$ORGANIZATION")
+            elif [ ! -f "$props" ]; then
+              args+=("-Dsonar.organization=${OWNER,,}")
+            fi
+          fi
+
+          if [ "$QUALITY_GATE" = "true" ]; then
+            args+=("-Dsonar.qualitygate.wait=true" "-Dsonar.qualitygate.timeout=$QUALITY_GATE_TIMEOUT")
+          fi
+
+          # EXTRA_ARGS bleibt unverändert, die Scan-Action zerlegt Quotes selbst
+          {
+            echo "value<<EOF_ARGS"
+            printf '%s\n' "${args[@]}"
+            printf '%s\n' "$EXTRA_ARGS"
+            echo "EOF_ARGS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: SonarQube Scan
+        if: steps.token.outputs.enabled == 'true'
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectBaseDir: ${{ inputs.project-base-dir }}
+          args: ${{ steps.args.outputs.value }}

@@ -1,0 +1,233 @@
+# Wiederverwendbarer OWASP Dependency-Check (SCA für bekannte CVEs in Abhängigkeiten).
+#
+# Lädt die Dependency-Check CLI mit gepinnter SHA-256, cached die NVD-Datenbank
+# pro Tag und lässt den Build ab dem CVSS-Schwellwert scheitern. Reports landen
+# immer als Artefakt, optional als SARIF im Security-Tab.
+
+name: Dependency-Check
+
+on:
+  workflow_call:
+    inputs:
+      scan-path:
+        description: Zu scannender Pfad (relativ zum Repo).
+        type: string
+        default: "."
+      exclude:
+        description: Ant-Pattern, die ausgeschlossen werden, ein Pattern pro Zeile.
+        type: string
+        default: |
+          **/.git/**
+          **/node_modules/**
+          **/.venv/**
+          **/venv/**
+      fail-on-cvss:
+        description: Build scheitert ab diesem CVSS-Score (0-10). 11 = nie scheitern.
+        type: number
+        default: 7
+      suppression-file:
+        description: Suppression-XML für False Positives. Leer = dependency-check-suppressions.xml im Repo-Root, falls vorhanden.
+        type: string
+        default: ""
+      enable-experimental:
+        description: Experimentelle Analyzer aktivieren (u. a. Python requirements.txt, Go).
+        type: boolean
+        default: true
+      skip-dev-dependencies:
+        description: devDependencies bei npm/yarn/pnpm ignorieren.
+        type: boolean
+        default: false
+      upload-sarif:
+        description: SARIF in GitHub Code Scanning hochladen. Braucht security-events:write und bei privaten Repos GitHub Advanced Security.
+        type: boolean
+        default: false
+      extra-args:
+        description: Weitere CLI-Argumente für dependency-check.sh.
+        type: string
+        default: ""
+      dc-version:
+        description: Version der Dependency-Check CLI.
+        type: string
+        default: "13.0.0"
+      dc-sha256:
+        description: SHA-256 des Release-ZIPs. Muss bei Änderung von dc-version mit angepasst werden.
+        type: string
+        default: "44d920d1ec03e948df862a253f0912782a31b9beee8a7c8895b9cb95760176ed"
+    secrets:
+      NVD_API_KEY:
+        description: NVD API Key (https://nvd.nist.gov/developers/request-an-api-key). Ohne Key dauert der erste Download der Datenbank sehr lange.
+        required: false
+      OSS_INDEX_TOKEN:
+        description: Sonatype Guide Personal Access Token für den OSS Index Analyzer. Ohne Token wird der Analyzer deaktiviert.
+        required: false
+
+jobs:
+  dependency-check:
+    name: Dependency-Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Pfade setzen
+        run: |
+          {
+            echo "DC_HOME=$RUNNER_TEMP/dependency-check"
+            echo "DC_DATA=$RUNNER_TEMP/dependency-check-data"
+            echo "DC_REPORTS=$RUNNER_TEMP/dependency-check-reports"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Java einrichten
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Dependency-Check CLI installieren
+        env:
+          DC_VERSION: ${{ inputs.dc-version }}
+          DC_SHA256: ${{ inputs.dc-sha256 }}
+        run: |
+          zip="$RUNNER_TEMP/dependency-check.zip"
+          curl -fsSL --retry 3 -o "$zip" \
+            "https://github.com/dependency-check/DependencyCheck/releases/download/v${DC_VERSION}/dependency-check-${DC_VERSION}-release.zip"
+          echo "${DC_SHA256}  ${zip}" | sha256sum --check --strict
+          unzip -q "$zip" -d "$RUNNER_TEMP"
+          "$DC_HOME/bin/dependency-check.sh" --version
+
+      - name: Datum für Cache-Schlüssel
+        id: date
+        run: echo "today=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      # Ein Cache-Eintrag pro Tag, Fallback auf den letzten Stand. Die Version steckt
+      # im Schlüssel, weil sich das DB-Schema zwischen Releases ändern kann.
+      - name: NVD-Datenbank aus Cache laden
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.DC_DATA }}
+          key: dependency-check-data-${{ runner.os }}-${{ inputs.dc-version }}-${{ steps.date.outputs.today }}
+          restore-keys: |
+            dependency-check-data-${{ runner.os }}-${{ inputs.dc-version }}-
+
+      - name: Scan
+        id: scan
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+          OSS_INDEX_TOKEN: ${{ secrets.OSS_INDEX_TOKEN }}
+          SCAN_PATH: ${{ inputs.scan-path }}
+          EXCLUDE: ${{ inputs.exclude }}
+          FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
+          SUPPRESSION_FILE: ${{ inputs.suppression-file }}
+          ENABLE_EXPERIMENTAL: ${{ inputs.enable-experimental }}
+          SKIP_DEV: ${{ inputs.skip-dev-dependencies }}
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+          PROJECT: ${{ github.repository }}
+        run: |
+          args=(
+            --project "$PROJECT"
+            --scan "$SCAN_PATH"
+            --data "$DC_DATA"
+            --out "$DC_REPORTS"
+            --format HTML --format JSON --format SARIF
+            --failOnCVSS "$FAIL_ON_CVSS"
+          )
+
+          while IFS= read -r pattern; do
+            [ -n "$pattern" ] && args+=(--exclude "$pattern")
+          done <<< "$EXCLUDE"
+
+          if [ -n "$NVD_API_KEY" ]; then
+            args+=(--nvdApiKey "$NVD_API_KEY")
+          else
+            echo "::warning title=Kein NVD API Key::Secret NVD_API_KEY fehlt. Das NVD-Update läuft stark gedrosselt."
+          fi
+
+          if [ -n "$OSS_INDEX_TOKEN" ]; then
+            args+=(--ossIndexPassword "$OSS_INDEX_TOKEN")
+          else
+            args+=(--disableOssIndex)
+          fi
+
+          if [ -z "$SUPPRESSION_FILE" ] && [ -f dependency-check-suppressions.xml ]; then
+            SUPPRESSION_FILE=dependency-check-suppressions.xml
+          fi
+          [ -n "$SUPPRESSION_FILE" ] && args+=(--suppression "$SUPPRESSION_FILE")
+
+          [ "$ENABLE_EXPERIMENTAL" = "true" ] && args+=(--enableExperimental)
+          [ "$SKIP_DEV" = "true" ] && args+=(--nodeAuditSkipDevDependencies)
+
+          # Whitespace-getrennt, ohne Glob-Expansion
+          read -ra extra <<< "$EXTRA_ARGS"
+          args+=("${extra[@]}")
+
+          mkdir -p "$DC_REPORTS"
+          set +e
+          "$DC_HOME/bin/dependency-check.sh" "${args[@]}"
+          code=$?
+          set -e
+          echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+          if [ -f "$DC_REPORTS/dependency-check-report.sarif" ]; then
+            echo "sarif=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Zusammenfassung
+        if: always() && steps.scan.outcome == 'success'
+        env:
+          FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
+        run: |
+          report="$DC_REPORTS/dependency-check-report.json"
+          if [ ! -f "$report" ]; then
+            echo "### Dependency-Check: kein Report erzeugt" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Höchster verfügbarer Score je Schwachstelle: CVSS v4, v3, v2
+          jq -r --argjson limit "$FAIL_ON_CVSS" '
+            [ .dependencies[]? as $d
+              | $d.vulnerabilities[]?
+              | { dep: $d.fileName,
+                  cve: .name,
+                  severity: (.severity // "UNKNOWN"),
+                  score: (.cvssv4.baseScore // .cvssv3.baseScore // .cvssv2.score // 0) }
+            ] | unique_by(.dep + .cve) | sort_by(-.score) as $v
+            | "### Dependency-Check",
+              "",
+              "| Schweregrad | Anzahl |", "|---|---|",
+              ( $v | group_by(.severity | ascii_upcase) | map("| \(.[0].severity | ascii_upcase) | \(length) |") | .[] ),
+              "",
+              "**Gesamt:** \($v | length) Schwachstellen, davon \($v | map(select(.score >= $limit)) | length) mit CVSS >= \($limit)",
+              "",
+              ( if ($v | length) > 0 then
+                  "| CVSS | CVE | Abhängigkeit |", "|---|---|---|",
+                  ( $v[:25][] | "| \(.score) | \(.cve) | `\(.dep)` |" )
+                else empty end )
+          ' "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Reports hochladen
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-check-report
+          path: ${{ env.DC_REPORTS }}
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: SARIF hochladen
+        if: always() && inputs.upload-sarif && steps.scan.outputs.sarif == 'true'
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: ${{ env.DC_REPORTS }}/dependency-check-report.sarif
+          category: dependency-check
+
+      - name: Ergebnis auswerten
+        env:
+          EXIT_CODE: ${{ steps.scan.outputs.exit-code }}
+          FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
+        run: |
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "::error title=Dependency-Check fehlgeschlagen::Schwachstellen mit CVSS >= $FAIL_ON_CVSS gefunden oder Scan-Fehler (Exit-Code $EXIT_CODE). Details im Report-Artefakt."
+            exit 1
+          fi

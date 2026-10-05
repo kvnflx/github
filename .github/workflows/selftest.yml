@@ -1,0 +1,59 @@
+# Testet die wiederverwendbaren Workflows in diesem Repo gegen ein Fixture mit
+# bekannter Schwachstelle (lodash 4.17.20, CVE-2021-23337).
+
+name: Selbsttest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+        with:
+          args: -color
+
+  dependency-check:
+    uses: ./.github/workflows/dependency-check.yml
+    with:
+      scan-path: test/fixtures/npm
+      # Der Selbsttest prüft die Erkennung, nicht das Gate
+      fail-on-cvss: 11
+    secrets:
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
+  verify-dependency-check:
+    name: Erkennung prüfen
+    needs: dependency-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dependency-check-report
+      - name: lodash-Schwachstelle mit CVSS >= 7 muss im Report stehen
+        run: |
+          hits=$(jq '[.dependencies[]? | select(.fileName | test("lodash"))
+                      | .vulnerabilities[]?
+                      | select((.cvssv4.baseScore // .cvssv3.baseScore // .cvssv2.score // 0) >= 7)] | length' \
+                 dependency-check-report.json)
+          echo "Treffer: $hits"
+          test "$hits" -gt 0
+
+  sonarqube:
+    uses: ./.github/workflows/sonarqube.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

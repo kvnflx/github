@@ -1,0 +1,35 @@
+# Vorlage für ein Projekt-Repo: nach .github/workflows/security.yml kopieren.
+#
+# Benötigte Secrets im Projekt-Repo (Settings > Secrets and variables > Actions):
+#   NVD_API_KEY   dringend empfohlen, sonst dauert das NVD-Update sehr lange
+#   SONAR_TOKEN   ohne Token wird der Sonar-Job mit Warnung übersprungen
+
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Wöchentlich, damit neue CVEs auch ohne Commit auffallen
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-check:
+    uses: kvnflx/github/.github/workflows/dependency-check.yml@v1
+    with:
+      fail-on-cvss: 7
+    secrets:
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
+  sonarqube:
+    uses: kvnflx/github/.github/workflows/sonarqube.yml@v1
+    # Selbst gehosteter Server statt SonarQube Cloud:
+    # with:
+    #   host-url: ${{ vars.SONAR_HOST_URL }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
