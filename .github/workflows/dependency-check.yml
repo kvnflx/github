@@ -45,14 +45,16 @@ on:
         description: Weitere CLI-Argumente für dependency-check.sh.
         type: string
         default: ""
+      # 13.0.0 bricht ohne NVD API Key ab (dependency-check/DependencyCheck#8715),
+      # daher bis zum nächsten Release 12.2.2
       dc-version:
         description: Version der Dependency-Check CLI.
         type: string
-        default: "13.0.0"
+        default: "12.2.2"
       dc-sha256:
         description: SHA-256 des Release-ZIPs. Muss bei Änderung von dc-version mit angepasst werden.
         type: string
-        default: "44d920d1ec03e948df862a253f0912782a31b9beee8a7c8895b9cb95760176ed"
+        default: "bf07fefd81af3094c5f6850423b014df44db62ce2dbad0f79079a90df675e44a"
     secrets:
       NVD_API_KEY:
         description: NVD API Key (https://nvd.nist.gov/developers/request-an-api-key). Ohne Key dauert der erste Download der Datenbank sehr lange.
@@ -65,7 +67,8 @@ jobs:
   dependency-check:
     name: Dependency-Check
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Erster Lauf ohne NVD API Key lädt die komplette Datenbank gedrosselt
+    timeout-minutes: 90
     steps:
       - name: Pfade setzen
         run: |
@@ -227,7 +230,13 @@ jobs:
           EXIT_CODE: ${{ steps.scan.outputs.exit-code }}
           FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
         run: |
-          if [ "$EXIT_CODE" != "0" ]; then
-            echo "::error title=Dependency-Check fehlgeschlagen::Schwachstellen mit CVSS >= $FAIL_ON_CVSS gefunden oder Scan-Fehler (Exit-Code $EXIT_CODE). Details im Report-Artefakt."
-            exit 1
-          fi
+          # Exit-Code 15 = failOnCVSS überschritten, alles andere ungleich 0 ist ein Scan-Fehler
+          case "$EXIT_CODE" in
+            0) ;;
+            15)
+              echo "::error title=Schwachstellen gefunden::Abhängigkeiten mit CVSS >= $FAIL_ON_CVSS. Details in der Zusammenfassung und im Artefakt dependency-check-report."
+              exit 1 ;;
+            *)
+              echo "::error title=Dependency-Check fehlgeschlagen::Scan-Fehler mit Exit-Code $EXIT_CODE, siehe Log des Schritts Scan."
+              exit 1 ;;
+          esac

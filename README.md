@@ -48,7 +48,7 @@ Die Secrets müssen im jeweiligen Projekt-Repo hinterlegt sein. Auf einem Person
 | `skip-dev-dependencies` | `false` | devDependencies bei npm, yarn, pnpm ignorieren |
 | `upload-sarif` | `false` | Funde im Security-Tab. Braucht `security-events: write` im Aufrufer und bei privaten Repos GitHub Advanced Security |
 | `extra-args` | leer | Weitere CLI-Argumente |
-| `dc-version`, `dc-sha256` | `13.0.0` | CLI-Version mit gepinnter Prüfsumme |
+| `dc-version`, `dc-sha256` | `12.2.2` | CLI-Version mit gepinnter Prüfsumme. 13.0.0 bricht ohne NVD API Key ab (Issue #8715), Update sobald 13.0.1 erscheint |
 
 Ergebnis: Tabelle in der Job-Zusammenfassung, HTML-, JSON- und SARIF-Report als Artefakt `dependency-check-report` (30 Tage).
 

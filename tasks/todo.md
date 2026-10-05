@@ -1,6 +1,6 @@
 # SonarQube und OWASP Dependency-Check in der Build-Pipeline
 
-- [x] Versionen recherchieren (sonarqube-scan-action v8.3.0, Dependency-Check 13.0.0, Actions-SHAs)
+- [x] Versionen recherchieren (sonarqube-scan-action v8.3.0, Dependency-Check 12.2.2, Actions-SHAs)
 - [x] GPG-Signatur des Dependency-Check-Release prüfen, SHA-256 pinnen
 - [x] `dependency-check.yml` als Reusable Workflow
 - [x] `sonarqube.yml` als Reusable Workflow, überspringt ohne Token
