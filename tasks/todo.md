@@ -11,8 +11,11 @@
 - [x] NVD-Daten über den Feed-Mirror statt der NVD-API (API brauchte > 45 min)
 - [x] `npm ci --ignore-scripts` vor dem Scan, sonst wird das Lockfile nicht vollständig analysiert
 - [x] PRs `ci/security-scan` in 13 Repos mit package-lock.json, nur berichten (fail-on-cvss: 11), alle Scans grün
-- [ ] PRs mergen
-- [ ] Kritische Funde abarbeiten (next, astro, postcss, vitest, proxy-addr, react), danach fail-on-cvss: 7
+- [x] PRs gemergt (2026-10-06), alle Default-Branches grün
+- [x] Funde behoben in 11 Repos (next, astro 7, postcss, vitest 4, nodemailer 10, react 19.2.8, sharp 0.35, Tailwind 4 in website-marketing), je Build/Tests/Smoke vorher und nachher
+- [x] fail-on-cvss: 7 in allen 13 Repos, braces 3.0.3 und node-forge 1.4.0 (kein Fix) befristet bis 2027-04-01 unterdrückt
+- [ ] Bis 2027-04-01: Suppressions für braces/node-forge neu bewerten
+- [ ] website-marketing: 3 alte Sonar-Code-Smells (Komplexität LeadDetailClient, Ternary TemplatesClient)
 - [ ] Auf Dependency-Check 13.0.1 aktualisieren, sobald released (Issue #8715)
 - [x] SonarQube-Server sonar.backsafe.de (netcup-Coolify), `SONAR_TOKEN` in allen Repos, Sonar-Job in den PRs `ci/security-scan` aller 29 Repos (06.10.2026)
 - [ ] Quality Gate scharf schalten (`quality-gate` Standard auf true), sobald der Bestand gesichtet ist
