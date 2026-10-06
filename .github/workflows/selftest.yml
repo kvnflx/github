@@ -1,5 +1,5 @@
 # Testet die wiederverwendbaren Workflows in diesem Repo gegen ein Fixture mit
-# bekannter Schwachstelle (lodash 4.17.20, CVE-2021-23337).
+# bekannter Schwachstelle (lodash 4.17.20, CVE-2021-23337), je einmal mit npm und pnpm.
 
 name: Selbsttest
 
@@ -29,7 +29,7 @@ jobs:
   dependency-check:
     uses: ./.github/workflows/dependency-check.yml
     with:
-      scan-path: test/fixtures/npm
+      scan-path: test/fixtures
       # Der Selbsttest prüft die Erkennung, nicht das Gate
       fail-on-cvss: 11
     secrets:
@@ -44,14 +44,16 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dependency-check-report
-      - name: lodash-Schwachstelle mit CVSS >= 7 muss im Report stehen
+      - name: lodash-Schwachstelle mit CVSS >= 7 muss für npm und pnpm im Report stehen
         run: |
-          hits=$(jq '[.dependencies[]? | select(.fileName | test("lodash"))
-                      | .vulnerabilities[]?
-                      | select((.cvssv4.baseScore // .cvssv3.baseScore // .cvssv2.score // 0) >= 7)] | length' \
-                 dependency-check-report.json)
-          echo "Treffer: $hits"
-          test "$hits" -gt 0
+          for pm in npm pnpm; do
+            hits=$(jq --arg pm "fixtures/$pm/" '[.dependencies[]?
+                        | select((.fileName | test("lodash")) and (.filePath | contains($pm)))
+                        | .vulnerabilities[]?
+                        | select((.cvssv4.baseScore // .cvssv3.baseScore // .cvssv2.score // 0) >= 7)] | length' dependency-check-report.json)
+            echo "$pm: $hits Treffer"
+            test "$hits" -gt 0
+          done
 
   sonarqube:
     uses: ./.github/workflows/sonarqube.yml

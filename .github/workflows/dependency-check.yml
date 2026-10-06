@@ -35,8 +35,9 @@ on:
         default: true
       npm-install:
         description: >-
-          Vor dem Scan "npm ci --ignore-scripts" in jedem Ordner mit package-lock.json ausführen.
-          Ohne node_modules wertet Dependency-Check das Lockfile nur über npm audit aus.
+          Vor dem Scan die JS-Abhängigkeiten ohne Lifecycle-Skripte installieren (npm ci, pnpm install,
+          yarn install, je nach Lockfile). Ohne node_modules wertet Dependency-Check Lockfiles nur
+          eingeschränkt aus, und der Pnpm/Yarn Audit Analyzer braucht das jeweilige Werkzeug.
         type: boolean
         default: true
       skip-dev-dependencies:
@@ -95,21 +96,38 @@ jobs:
         with:
           persist-credentials: false
 
-      # Ohne Lifecycle-Skripte, damit beim Scan kein Code aus Abhängigkeiten ausgeführt wird
-      - name: npm-Abhängigkeiten installieren
+      # Ohne Lifecycle-Skripte, damit beim Scan kein Code aus Abhängigkeiten ausgeführt wird.
+      # pnpm und yarn kommen über corepack; der Pnpm/Yarn Audit Analyzer braucht sie auf dem PATH.
+      - name: JS-Abhängigkeiten installieren
         if: inputs.npm-install
         env:
           SCAN_PATH: ${{ inputs.scan-path }}
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
         run: |
-          find "$SCAN_PATH" -name package-lock.json -not -path '*/node_modules/*' -print0 |
-            while IFS= read -r -d '' lock; do
-              dir=$(dirname "$lock")
-              echo "::group::npm ci in $dir"
-              if ! (cd "$dir" && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error); then
-                echo "::warning title=npm ci fehlgeschlagen::$dir wird nur eingeschränkt über npm audit geprüft."
-              fi
-              echo "::endgroup::"
-            done
+          locks=$(find "$SCAN_PATH" \( -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock \) -not -path '*/node_modules/*' | sort)
+          if grep -qE '(pnpm-lock\.yaml|yarn\.lock)$' <<< "$locks"; then
+            corepack enable
+          fi
+
+          while IFS= read -r lock; do
+            [ -n "$lock" ] || continue
+            dir=$(dirname "$lock")
+            case "$(basename "$lock")" in
+              package-lock.json) cmd=(npm ci --ignore-scripts --no-audit --no-fund --loglevel=error) ;;
+              pnpm-lock.yaml) cmd=(pnpm install --frozen-lockfile --ignore-scripts) ;;
+              yarn.lock)
+                if [ -f "$dir/.yarnrc.yml" ]; then
+                  cmd=(yarn install --immutable --mode=skip-build)
+                else
+                  cmd=(yarn install --frozen-lockfile --ignore-scripts)
+                fi ;;
+            esac
+            echo "::group::${cmd[0]} install in $dir"
+            if ! (cd "$dir" && "${cmd[@]}"); then
+              echo "::warning title=${cmd[0]} install fehlgeschlagen::$dir wird nur eingeschränkt geprüft."
+            fi
+            echo "::endgroup::"
+          done <<< "$locks"
 
       - name: Java einrichten
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
