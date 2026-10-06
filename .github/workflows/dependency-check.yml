@@ -103,13 +103,17 @@ jobs:
         if: inputs.npm-install
         env:
           SCAN_PATH: ${{ inputs.scan-path }}
+          # yarn 1 ignoriert damit yarn-path aus jeder .yarnrc (auch aus Elternordnern)
+          YARN_IGNORE_PATH: "1"
         run: |
           locks=$(find "$SCAN_PATH" \( -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock \) -not -path '*/node_modules/*' | sort)
-          if grep -q 'pnpm-lock\.yaml$' <<< "$locks"; then
-            npm install -g --ignore-scripts --no-audit --no-fund --loglevel=error pnpm@10.34.6
-          fi
-          if grep -q 'yarn\.lock$' <<< "$locks"; then
-            npm install -g --ignore-scripts --no-audit --no-fund --loglevel=error yarn@1.22.22
+          # Werkzeuge außerhalb des Repos installieren, damit eine .npmrc im Repo keine
+          # fremde Registry für pnpm/yarn unterschieben kann
+          tools=()
+          grep -q 'pnpm-lock\.yaml$' <<< "$locks" && tools+=(pnpm@10.34.6)
+          grep -q 'yarn\.lock$' <<< "$locks" && tools+=(yarn@1.22.22)
+          if [ ${#tools[@]} -gt 0 ]; then
+            (cd "$RUNNER_TEMP" && npm install -g --registry=https://registry.npmjs.org/ --ignore-scripts --no-audit --no-fund --loglevel=error "${tools[@]}")
           fi
 
           while IFS= read -r lock; do
@@ -122,8 +126,15 @@ jobs:
                 cmd=(pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile
                      --config.manage-package-manager-versions=false) ;;
               yarn.lock)
-                if [ -f "$dir/.yarnrc.yml" ] || grep -qs 'yarn-path' "$dir/.yarnrc"; then
-                  echo "::warning title=yarn übersprungen::$dir nutzt Yarn Berry oder yarn-path. Das würde Code aus dem Repo ausführen, daher nur eingeschränkte Prüfung."
+                # Yarn Berry (.yarnrc.yml im Ordner oder darüber) würde yarnPath aus dem Repo ausführen
+                berry=""; d="$dir"
+                while :; do
+                  [ -f "$d/.yarnrc.yml" ] && berry="$d/.yarnrc.yml"
+                  [ "$d" = "." ] || [ "$d" = "/" ] || [ "$d" = "$GITHUB_WORKSPACE" ] && break
+                  d=$(dirname "$d")
+                done
+                if [ -n "$berry" ]; then
+                  echo "::warning title=yarn übersprungen::$dir nutzt Yarn Berry ($berry). Installation würde Code aus dem Repo ausführen, daher nur eingeschränkte Prüfung."
                   continue
                 fi
                 cmd=(yarn install --frozen-lockfile --ignore-scripts --non-interactive) ;;
