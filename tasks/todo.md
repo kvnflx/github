@@ -14,4 +14,5 @@
 - [ ] PRs mergen
 - [ ] Kritische Funde abarbeiten (next, astro, postcss, vitest, proxy-addr, react), danach fail-on-cvss: 7
 - [ ] Auf Dependency-Check 13.0.1 aktualisieren, sobald released (Issue #8715)
-- [ ] SonarQube Cloud oder Server einrichten, `SONAR_TOKEN` hinterlegen, Sonar-Job in die Repos aufnehmen
+- [x] SonarQube-Server sonar.backsafe.de (netcup-Coolify), `SONAR_TOKEN` in allen Repos, Sonar-Job in den PRs `ci/security-scan` aller 29 Repos (06.10.2026)
+- [ ] Quality Gate scharf schalten (`quality-gate` Standard auf true), sobald der Bestand gesichtet ist
