@@ -44,16 +44,22 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dependency-check-report
+      # Dependency-Check führt gleiche Pakete zusammen, das pnpm-lodash steht dann in
+      # relatedDependencies des npm-Eintrags. Zusätzlich liefert der Pnpm Audit Analyzer einen eigenen Eintrag.
       - name: lodash-Schwachstelle mit CVSS >= 7 muss für npm und pnpm im Report stehen
         run: |
           for pm in npm pnpm; do
             hits=$(jq --arg pm "fixtures/$pm/" '[.dependencies[]?
-                        | select((.fileName | test("lodash")) and (.filePath | contains($pm)))
+                        | select(.fileName | test("lodash"))
+                        | select((.filePath | contains($pm)) or ([.relatedDependencies[]?.filePath | contains($pm)] | any))
                         | .vulnerabilities[]?
                         | select((.cvssv4.baseScore // .cvssv3.baseScore // .cvssv2.score // 0) >= 7)] | length' dependency-check-report.json)
             echo "$pm: $hits Treffer"
             test "$hits" -gt 0
           done
+          audit=$(jq '[.dependencies[]? | select(.filePath | test("fixtures/pnpm/pnpm-lock.yaml")) | .vulnerabilities[]?] | length' dependency-check-report.json)
+          echo "Pnpm Audit Analyzer: $audit Treffer"
+          test "$audit" -gt 0
 
   sonarqube:
     uses: ./.github/workflows/sonarqube.yml

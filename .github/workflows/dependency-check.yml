@@ -96,31 +96,37 @@ jobs:
         with:
           persist-credentials: false
 
-      # Ohne Lifecycle-Skripte, damit beim Scan kein Code aus Abhängigkeiten ausgeführt wird.
-      # pnpm und yarn kommen über corepack; der Pnpm/Yarn Audit Analyzer braucht sie auf dem PATH.
+      # Installiert ohne Code aus dem Repo auszuführen: keine Lifecycle-Skripte, kein .pnpmfile,
+      # keine vom Repo gewählte Paketmanager-Version (packageManager/corepack, yarnPath).
+      # pnpm und yarn liegen danach auf dem PATH, das brauchen der Pnpm/Yarn Audit Analyzer.
       - name: JS-Abhängigkeiten installieren
         if: inputs.npm-install
         env:
           SCAN_PATH: ${{ inputs.scan-path }}
-          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
         run: |
           locks=$(find "$SCAN_PATH" \( -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock \) -not -path '*/node_modules/*' | sort)
-          if grep -qE '(pnpm-lock\.yaml|yarn\.lock)$' <<< "$locks"; then
-            corepack enable
+          if grep -q 'pnpm-lock\.yaml$' <<< "$locks"; then
+            npm install -g --ignore-scripts --no-audit --no-fund --loglevel=error pnpm@10.34.6
+          fi
+          if grep -q 'yarn\.lock$' <<< "$locks"; then
+            npm install -g --ignore-scripts --no-audit --no-fund --loglevel=error yarn@1.22.22
           fi
 
           while IFS= read -r lock; do
             [ -n "$lock" ] || continue
             dir=$(dirname "$lock")
             case "$(basename "$lock")" in
-              package-lock.json) cmd=(npm ci --ignore-scripts --no-audit --no-fund --loglevel=error) ;;
-              pnpm-lock.yaml) cmd=(pnpm install --frozen-lockfile --ignore-scripts) ;;
+              package-lock.json)
+                cmd=(npm ci --ignore-scripts --no-audit --no-fund --loglevel=error) ;;
+              pnpm-lock.yaml)
+                cmd=(pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile
+                     --config.manage-package-manager-versions=false) ;;
               yarn.lock)
-                if [ -f "$dir/.yarnrc.yml" ]; then
-                  cmd=(yarn install --immutable --mode=skip-build)
-                else
-                  cmd=(yarn install --frozen-lockfile --ignore-scripts)
-                fi ;;
+                if [ -f "$dir/.yarnrc.yml" ] || grep -qs 'yarn-path' "$dir/.yarnrc"; then
+                  echo "::warning title=yarn übersprungen::$dir nutzt Yarn Berry oder yarn-path. Das würde Code aus dem Repo ausführen, daher nur eingeschränkte Prüfung."
+                  continue
+                fi
+                cmd=(yarn install --frozen-lockfile --ignore-scripts --non-interactive) ;;
             esac
             echo "::group::${cmd[0]} install in $dir"
             if ! (cd "$dir" && "${cmd[@]}"); then
