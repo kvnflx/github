@@ -5,7 +5,7 @@ Zentrale, wiederverwendbare GitHub-Actions-Workflows für alle Repos unter `kvnf
 | Workflow | Zweck | Build scheitert bei |
 |---|---|---|
 | `dependency-check.yml` | OWASP Dependency-Check, bekannte CVEs in Abhängigkeiten | CVSS >= 7 (einstellbar) |
-| `sonarqube.yml` | SonarQube Cloud oder Server, statische Codeanalyse | rotem Quality Gate |
+| `sonarqube.yml` | SonarQube auf https://sonar.backsafe.de, statische Codeanalyse, PR-Kommentare | rotem Quality Gate, nur mit `quality-gate: true` |
 
 ## Einbinden
 
@@ -31,7 +31,7 @@ Damit ein Merge bei Funden blockiert wird, in den Branch-Protection-Regeln des P
 | Secret | Pflicht | Woher |
 |---|---|---|
 | `NVD_API_KEY` | optional | Nur nötig, wenn `nvd-datafeed` leer ist und direkt die NVD-API benutzt wird. Kostenlos unter https://nvd.nist.gov/developers/request-an-api-key. |
-| `SONAR_TOKEN` | für Sonar | SonarQube Cloud: My Account > Security. Server: User > My Account > Security. Ohne Token wird der Sonar-Job mit Warnung übersprungen. |
+| `SONAR_TOKEN` | für Sonar | Global Analysis Token von sonar.backsafe.de (KeePass auf MASTER: `sonarqube/Global Analysis Token github-actions`). Ohne Token wird der Sonar-Job mit Warnung übersprungen. |
 | `OSS_INDEX_TOKEN` | optional | Sonatype Guide Personal Access Token. Ohne Token ist der OSS Index Analyzer aus. |
 
 Die Secrets müssen im jeweiligen Projekt-Repo hinterlegt sein. Auf einem Personal Account gibt es keine kontoweiten Secrets.
@@ -64,13 +64,13 @@ Für npm-Projekte führt der Workflow vor dem Scan in jedem Ordner mit `package-
 
 | Input | Standard | Beschreibung |
 |---|---|---|
-| `host-url` | leer | Leer = SonarQube Cloud, sonst URL des eigenen Servers |
+| `host-url` | `https://sonar.backsafe.de` | `https://sonarcloud.io` für SonarQube Cloud |
 | `organization` | GitHub-Owner | Nur Cloud |
 | `project-key` | `<owner>_<repo>` | Entspricht dem Schlüssel beim Import aus GitHub in SonarQube Cloud |
 | `project-base-dir` | `.` | Basisverzeichnis |
 | `args` | leer | Weitere `-Dsonar.*` Parameter |
 | `coverage-artifact` | leer | Artefakt aus einem Test-Job, das vor dem Scan entpackt wird |
-| `quality-gate` | `true` | Gate abwarten, rotes Gate lässt den Build scheitern |
+| `quality-gate` | `false` | `true` = Gate abwarten, rotes Gate lässt den Build scheitern. Vorerst aus, das Gate steht trotzdem im PR-Kommentar |
 | `quality-gate-timeout` | `300` | Sekunden |
 
 Liegt im Projekt eine `sonar-project.properties`, gelten deren Werte für Schlüssel und Organisation, solange die Inputs leer sind.
@@ -99,11 +99,21 @@ jobs:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 ```
 
-### SonarQube einrichten
+### SonarQube-Server
 
-SonarQube Cloud (kostenlos für öffentliche Repos): auf https://sonarcloud.io mit GitHub anmelden, Organisation `kvnflx` importieren, Projekt anlegen, unter Administration > Analysis Method die automatische Analyse ausschalten (sonst kollidiert sie mit dem CI-Scan) und den Token als `SONAR_TOKEN` hinterlegen.
+Läuft seit 06.10.2026 als Coolify-Service `sonarqube` auf netcup-rs2000 unter https://sonar.backsafe.de: Community Build 26.5 mit dem Community-Branch-Plugin von mc1arke. Damit werden auch Branches und Pull Requests analysiert, und die GitHub App `sonarqube-kvnflx` schreibt das Ergebnis als Kommentar in den PR. Anmeldung ist Pflicht, Projekte sind privat.
 
-Eigener Server: Der Server muss aus dem Internet erreichbar sein, weil die GitHub-Runner von außen zugreifen. `host-url` als Repo-Variable `SONAR_HOST_URL` setzen und im Aufrufer `host-url: ${{ vars.SONAR_HOST_URL }}` eintragen.
+Neues Repo anbinden:
+
+1. Projekt `kvnflx_<repo>` in SonarQube anlegen (Hauptbranch = Default-Branch des Repos) und unter Project Settings > DevOps Platform Integration an `kvnflx/<repo>` binden (Konfiguration `github-kvnflx`)
+2. `gh secret set SONAR_TOKEN -R kvnflx/<repo>` mit dem Global Analysis Token
+3. `examples/security.yml` übernehmen
+
+Die GitHub App muss Zugriff auf das Repo haben. Sie ist auf „All repositories" installiert, neue Repos sind damit automatisch drin.
+
+Ein PR wird erst sauber kommentiert, wenn der Zielbranch einmal analysiert wurde. Nach dem Einbinden deshalb einmal auf main pushen oder den Workflow manuell starten.
+
+SonarQube Cloud geht weiterhin mit `host-url: https://sonarcloud.io`.
 
 ## Versionierung
 

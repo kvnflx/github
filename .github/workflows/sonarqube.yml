@@ -1,8 +1,9 @@
-# Wiederverwendbarer SonarQube-Scan (SonarQube Cloud oder selbst gehosteter Server).
+# Wiederverwendbarer SonarQube-Scan, standardmäßig gegen den eigenen Server sonar.backsafe.de
+# (Community Build mit Branch-Plugin, PR-Kommentare über die GitHub App sonarqube-kvnflx).
 #
 # Ohne SONAR_TOKEN wird der Job mit einer Warnung übersprungen, damit Repos den
 # Workflow schon einbinden können, bevor Sonar eingerichtet ist.
-# Mit Token wird das Quality Gate abgewartet und ein rotes Gate lässt den Build scheitern.
+# Mit quality-gate: true wird das Gate abgewartet und ein rotes Gate lässt den Build scheitern.
 
 name: SonarQube
 
@@ -10,9 +11,9 @@ on:
   workflow_call:
     inputs:
       host-url:
-        description: URL des SonarQube Servers. Leer lassen für SonarQube Cloud.
+        description: URL des SonarQube Servers. https://sonarcloud.io für SonarQube Cloud.
         type: string
-        default: ""
+        default: "https://sonar.backsafe.de"
       organization:
         description: Organisation in SonarQube Cloud. Leer = GitHub-Owner (nur Cloud, nur ohne sonar-project.properties).
         type: string
@@ -34,9 +35,9 @@ on:
         type: string
         default: ""
       quality-gate:
-        description: Quality Gate abwarten und Build bei rotem Gate scheitern lassen.
+        description: Quality Gate abwarten und Build bei rotem Gate scheitern lassen. Vorerst aus, das Gate steht trotzdem im PR-Kommentar.
         type: boolean
-        default: true
+        default: false
       quality-gate-timeout:
         description: Maximale Wartezeit auf das Quality Gate in Sekunden.
         type: number
@@ -98,6 +99,11 @@ jobs:
           args=()
           props="$BASE_DIR/sonar-project.properties"
 
+          is_cloud=false
+          case "$HOST_URL" in
+            ""|https://sonarcloud.io|https://sonarcloud.io/) is_cloud=true ;;
+          esac
+
           if [ -n "$HOST_URL" ]; then
             args+=("-Dsonar.host.url=$HOST_URL")
           fi
@@ -105,11 +111,11 @@ jobs:
           if [ -n "$PROJECT_KEY" ]; then
             args+=("-Dsonar.projectKey=$PROJECT_KEY")
           elif [ ! -f "$props" ]; then
-            # Standardschlüssel beim Import aus GitHub in SonarQube Cloud
+            # Standardschlüssel, so auch auf sonar.backsafe.de angelegt
             args+=("-Dsonar.projectKey=${OWNER}_${REPO}")
           fi
 
-          if [ -z "$HOST_URL" ]; then
+          if [ "$is_cloud" = "true" ]; then
             if [ -n "$ORGANIZATION" ]; then
               args+=("-Dsonar.organization=$ORGANIZATION")
             elif [ ! -f "$props" ]; then
