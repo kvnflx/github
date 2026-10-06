@@ -33,6 +33,12 @@ on:
         description: Experimentelle Analyzer aktivieren (u. a. Python requirements.txt, Go).
         type: boolean
         default: true
+      npm-install:
+        description: >-
+          Vor dem Scan "npm ci --ignore-scripts" in jedem Ordner mit package-lock.json ausführen.
+          Ohne node_modules wertet Dependency-Check das Lockfile nur über npm audit aus.
+        type: boolean
+        default: true
       skip-dev-dependencies:
         description: devDependencies bei npm/yarn/pnpm ignorieren.
         type: boolean
@@ -63,7 +69,7 @@ on:
         default: "bf07fefd81af3094c5f6850423b014df44db62ce2dbad0f79079a90df675e44a"
     secrets:
       NVD_API_KEY:
-        description: NVD API Key (https://nvd.nist.gov/developers/request-an-api-key). Ohne Key dauert der erste Download der Datenbank sehr lange.
+        description: NVD API Key (https://nvd.nist.gov/developers/request-an-api-key). Nur nötig, wenn nvd-datafeed leer ist.
         required: false
       OSS_INDEX_TOKEN:
         description: Sonatype Guide Personal Access Token für den OSS Index Analyzer. Ohne Token wird der Analyzer deaktiviert.
@@ -73,7 +79,7 @@ jobs:
   dependency-check:
     name: Dependency-Check
     runs-on: ubuntu-latest
-    # Erster Lauf ohne NVD API Key lädt die komplette Datenbank gedrosselt
+    # Großzügig für den Fall nvd-datafeed leer: erster Download über die NVD-API dauert lange
     timeout-minutes: 90
     steps:
       - name: Pfade setzen
@@ -88,6 +94,22 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # Ohne Lifecycle-Skripte, damit beim Scan kein Code aus Abhängigkeiten ausgeführt wird
+      - name: npm-Abhängigkeiten installieren
+        if: inputs.npm-install
+        env:
+          SCAN_PATH: ${{ inputs.scan-path }}
+        run: |
+          find "$SCAN_PATH" -name package-lock.json -not -path '*/node_modules/*' -print0 |
+            while IFS= read -r -d '' lock; do
+              dir=$(dirname "$lock")
+              echo "::group::npm ci in $dir"
+              if ! (cd "$dir" && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error); then
+                echo "::warning title=npm ci fehlgeschlagen::$dir wird nur eingeschränkt über npm audit geprüft."
+              fi
+              echo "::endgroup::"
+            done
 
       - name: Java einrichten
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1

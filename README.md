@@ -45,6 +45,7 @@ Die Secrets müssen im jeweiligen Projekt-Repo hinterlegt sein. Auf einem Person
 | `fail-on-cvss` | `7` | Schwellwert, `11` = nur berichten |
 | `suppression-file` | leer | Leer = `dependency-check-suppressions.xml` im Repo-Root, falls vorhanden |
 | `enable-experimental` | `true` | Experimentelle Analyzer, nötig u. a. für Python `requirements.txt` und Go |
+| `npm-install` | `true` | `npm ci --ignore-scripts` vor dem Scan, für vollständige npm-Analyse |
 | `skip-dev-dependencies` | `false` | devDependencies bei npm, yarn, pnpm ignorieren |
 | `upload-sarif` | `false` | Funde im Security-Tab. Braucht `security-events: write` im Aufrufer und bei privaten Repos GitHub Advanced Security |
 | `nvd-datafeed` | Mirror des Dependency-Check-Projekts | NVD-Daten als Feed, täglich aktualisiert, schnell und ohne Rate-Limit. Leer = NVD-API mit `NVD_API_KEY` (erster Lauf dauert dann über eine Stunde) |
@@ -57,7 +58,7 @@ Die NVD-Datenbank wird pro Repo und Tag im Actions-Cache gehalten. Nach dem erst
 
 False Positives: `examples/dependency-check-suppressions.xml` als `dependency-check-suppressions.xml` ins Projekt-Root legen und dort eintragen.
 
-Für npm-Projekte reicht eine eingecheckte `package-lock.json`, ein `npm install` vorab ist nicht nötig.
+Für npm-Projekte führt der Workflow vor dem Scan in jedem Ordner mit `package-lock.json` ein `npm ci --ignore-scripts` aus. Ohne `node_modules` würde Dependency-Check das Lockfile nur über `npm audit` prüfen und den Abgleich gegen die NVD auslassen. Abschalten mit `npm-install: false`.
 
 ## sonarqube.yml
 
