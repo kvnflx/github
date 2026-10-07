@@ -6,6 +6,10 @@ Zentrale, wiederverwendbare GitHub-Actions-Workflows für alle Repos unter `kvnf
 |---|---|---|
 | `dependency-check.yml` | OWASP Dependency-Check, bekannte CVEs in Abhängigkeiten | CVSS >= 7 (einstellbar) |
 | `sonarqube.yml` | SonarQube auf https://sonar.backsafe.de, statische Codeanalyse, PR-Kommentare | rotem Quality Gate, nur mit `quality-gate: true` |
+| `docker-build.yml` | Build-Check: Dockerfile bauen, `version.txt` prüfen | fehlgeschlagenem Build |
+| `deploy-coolify.yml` | Deploy auf Coolify, Smoke-Test, automatischer Rollback | fehlgeschlagenem Deploy oder Smoke-Test |
+| `notify-ntfy.yml` | Meldung per ntfy | |
+| `dependabot-automerge.yml` | Patch und Minor von Dependabot automatisch mergen | |
 
 ## Einbinden
 
@@ -114,6 +118,20 @@ Die GitHub App muss Zugriff auf das Repo haben. Sie ist auf „All repositories"
 Ein PR wird erst sauber kommentiert, wenn der Zielbranch einmal analysiert wurde. Nach dem Einbinden deshalb einmal auf main pushen oder den Workflow manuell starten.
 
 SonarQube Cloud geht weiterhin mit `host-url: https://sonarcloud.io`.
+
+## Prod-Pipeline
+
+Für Repos, die auf `backsafe-prod-server` laufen. Live geht nur, was Build, Dependency-Check (CVSS ab 7) und SonarQube bestanden hat.
+
+1. `examples/prod.yml` nach `.github/workflows/prod.yml`, `examples/prod-dependabot-automerge.yml` nach `.github/workflows/dependabot-automerge.yml`, `examples/prod-dependabot.yml` nach `.github/dependabot.yml`. Eine vorhandene `security.yml` entfernen, sonst laufen die Scans doppelt.
+2. Repo-Variablen `COOLIFY_APP_UUID`, `PROD_URL`, `PROD_NAME`, `PROD_KEYWORD` setzen.
+3. Secrets für Actions: `SONAR_TOKEN`, `COOLIFY_DEPLOY_TOKEN`, `NTFY_URL`. Für Dependabot: `SONAR_TOKEN`, `NTFY_URL`, `AUTOMERGE_CLIENT_ID`, `AUTOMERGE_APP_KEY`.
+4. Das Dockerfile nimmt `ARG SOURCE_COMMIT` an und schreibt ihn nach `/usr/share/nginx/html/version.txt`. Der Smoke-Test vergleicht diese Datei mit dem deployten Commit, damit eine Kopie aus dem Cloudflare-Cache nicht als Erfolg zählt.
+5. In Coolify Auto-Deploy aus und „Include Source Commit in Build" an.
+
+Ablauf: PR → Checks → Merge → Checks auf main → Deploy → Smoke-Test → bei Fehler Rollback. Meldungen per ntfy bei Blockade, Fehlschlag, Rollback, neuer Lücke in Produktion und wartendem Major-Update. Erfolgreiche Deploys werden nicht gemeldet.
+
+`sonarqube.yml` mit `require-token: true` scheitert ohne Token, statt zu überspringen. Ein übersprungener Job zählt bei GitHub als bestandener Pflicht-Check.
 
 ## Versionierung
 
