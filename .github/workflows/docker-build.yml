@@ -1,0 +1,50 @@
+# Wiederverwendbarer Build-Check: baut das Dockerfile des Repos ohne Push und prüft,
+# dass version.txt im Image genau den gebauten Commit enthält. Coolify übergibt beim
+# echten Deploy denselben Wert als Build-Argument SOURCE_COMMIT.
+
+name: Docker-Build
+
+on:
+  workflow_call:
+    inputs:
+      context:
+        description: Build-Kontext.
+        type: string
+        default: "."
+      dockerfile:
+        description: Pfad zum Dockerfile, relativ zum Kontext.
+        type: string
+        default: Dockerfile
+      version-file:
+        description: Pfad der version.txt im Image. Leer = nicht prüfen.
+        type: string
+        default: /usr/share/nginx/html/version.txt
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Docker-Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Image bauen
+        env:
+          CONTEXT: ${{ inputs.context }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: docker build --pull --build-arg "SOURCE_COMMIT=$GITHUB_SHA" -f "$CONTEXT/$DOCKERFILE" -t ci-check:latest "$CONTEXT"
+
+      - name: version.txt prüfen
+        if: inputs.version-file != ''
+        env:
+          VERSION_FILE: ${{ inputs.version-file }}
+        run: |
+          got=$(docker run --rm --entrypoint cat ci-check:latest "$VERSION_FILE")
+          echo "version.txt: $got"
+          test "$got" = "$GITHUB_SHA"
