@@ -1,6 +1,6 @@
 # Wiederverwendbarer Build-Check: baut das Dockerfile des Repos ohne Push und prüft,
-# dass version.txt im Image genau den gebauten Commit enthält. Coolify übergibt beim
-# echten Deploy denselben Wert als Build-Argument SOURCE_COMMIT.
+# dass version.txt im Image genau den gebauten Commit enthält und das Image nicht als root läuft.
+# Coolify übergibt beim echten Deploy denselben Commit als Build-Argument SOURCE_COMMIT.
 
 name: Docker-Build
 
@@ -39,6 +39,16 @@ jobs:
           CONTEXT: ${{ inputs.context }}
           DOCKERFILE: ${{ inputs.dockerfile }}
         run: docker build --pull --build-arg "SOURCE_COMMIT=$GITHUB_SHA" -f "$CONTEXT/$DOCKERFILE" -t ci-check:latest "$CONTEXT"
+
+      - name: Läuft nicht als root
+        run: |
+          user=$(docker image inspect -f '{{.Config.User}}' ci-check:latest)
+          echo "Image-User: '${user}'"
+          case "$user" in
+            ""|root|0|0:*|root:*)
+              echo "::error title=Image läuft als root::Das Image muss mit einem eigenen Benutzer laufen (z. B. nginxinc/nginx-unprivileged mit USER 101)."
+              exit 1 ;;
+          esac
 
       - name: version.txt prüfen
         if: inputs.version-file != ''
