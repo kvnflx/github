@@ -101,7 +101,7 @@ def fetch(url, timeout=15):
             return r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, ""
-    except (urllib.error.URLError, OSError):
+    except OSError:  # deckt auch URLError ab
         return 0, ""
 
 
@@ -130,7 +130,7 @@ def notify(ntfy_url, title, message, priority=3):
     try:
         _json_request(base + "/", "POST", {"topic": topic, "title": title, "message": message, "priority": priority})
         return True
-    except (urllib.error.URLError, OSError) as e:
+    except OSError as e:  # deckt auch URLError ab
         print(f"ntfy nicht erreichbar ({e}): {title}: {message}", file=sys.stderr)
         return False
 

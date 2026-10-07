@@ -36,7 +36,7 @@ class World:
 def make_handler(world):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
-            pass
+            pass  # Testausgabe ruhig halten
 
         def _send(self, code, body, ctype="application/json"):
             if ctype == "application/json":
@@ -117,8 +117,8 @@ class Base(unittest.TestCase):
         self.server.server_close()
 
     def args(self, **kw):
-        a = dict(app="app", url=self.url, keyword="Barbershop", sha=NEW, name="cedre",
-                 timeout=30, attempts=2, delay=0)
+        a = {"app": "app", "url": self.url, "keyword": "Barbershop", "sha": NEW, "name": "cedre",
+             "timeout": 30, "attempts": 2, "delay": 0}
         a.update(kw)
         return argparse.Namespace(**a)
 
