@@ -1,0 +1,70 @@
+# Deploy auf Coolify mit Smoke-Test und automatischem Rollback.
+# Darf nur nach grünen Checks aufgerufen werden (needs im Aufrufer).
+# Logik in scripts/coolify_deploy.py, hier nur der Rahmen.
+
+name: Deploy Coolify
+
+on:
+  workflow_call:
+    inputs:
+      app-uuid:
+        description: UUID der Anwendung in Coolify.
+        type: string
+        required: true
+      url:
+        description: Öffentliche Adresse der Seite für den Smoke-Test.
+        type: string
+        required: true
+      keyword:
+        description: Text, der auf der Startseite stehen muss.
+        type: string
+        required: true
+      name:
+        description: Anzeigename für Meldungen.
+        type: string
+        default: ""
+      tooling-ref:
+        description: Stand von kvnflx/github, aus dem das Deploy-Skript geladen wird.
+        type: string
+        default: v1
+    secrets:
+      COOLIFY_DEPLOY_TOKEN:
+        required: true
+      NTFY_URL:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Nie zwei Deploys derselben Seite gleichzeitig, wartende Läufe nicht abbrechen
+    concurrency:
+      group: deploy-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Deploy-Werkzeug laden
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kvnflx/github
+          ref: ${{ inputs.tooling-ref }}
+          path: .tooling
+          persist-credentials: false
+
+      - name: Deploy, Smoke-Test, Rollback
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
+          NTFY_URL: ${{ secrets.NTFY_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+          APP: ${{ inputs.app-uuid }}
+          URL: ${{ inputs.url }}
+          KEYWORD: ${{ inputs.keyword }}
+          NAME: ${{ inputs.name }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: >-
+          python3 .tooling/scripts/coolify_deploy.py deploy
+          --app "$APP" --url "$URL" --keyword "$KEYWORD" --sha "$GITHUB_SHA"
+          --name "$NAME" --repo "$GITHUB_REPOSITORY" --branch "$BRANCH"
