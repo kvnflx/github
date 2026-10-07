@@ -65,3 +65,38 @@ jobs:
     uses: ./.github/workflows/sonarqube.yml
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  python-tests:
+    name: Python-Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Deploy-Skript testen
+        run: python3 -m unittest discover -s test/python -v
+
+  sonar-token-check:
+    name: Sonar-Tokenpflicht
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Token-Prüfung aus sonarqube.yml testen
+        run: |
+          yq '.jobs.sonarqube.steps[] | select(.name == "Token prüfen") | .run' .github/workflows/sonarqube.yml > /tmp/check.sh
+          export GITHUB_OUTPUT=/tmp/out GITHUB_STEP_SUMMARY=/tmp/summary
+          if SONAR_TOKEN="" REQUIRE_TOKEN=true bash -e /tmp/check.sh; then
+            echo "Fehlender Token mit Pflicht wurde nicht als Fehler erkannt"; exit 1
+          fi
+          : > /tmp/out; SONAR_TOKEN="" REQUIRE_TOKEN=false bash -e /tmp/check.sh; grep -qx "enabled=false" /tmp/out
+          : > /tmp/out; SONAR_TOKEN=x REQUIRE_TOKEN=true bash -e /tmp/check.sh; grep -qx "enabled=true" /tmp/out
+          echo "Tokenpflicht verhält sich korrekt"
+
+  docker-build:
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      context: test/fixtures/docker

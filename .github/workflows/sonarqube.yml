@@ -42,6 +42,10 @@ on:
         description: Maximale Wartezeit auf das Quality Gate in Sekunden.
         type: number
         default: 300
+      require-token:
+        description: Fehlender SONAR_TOKEN lässt den Job scheitern statt ihn zu überspringen. Pflicht auf Prod-Repos, weil ein übersprungener Job als bestandener Pflicht-Check zählt.
+        type: boolean
+        default: false
     secrets:
       SONAR_TOKEN:
         description: Analyse-Token aus SonarQube.
@@ -57,8 +61,13 @@ jobs:
         id: token
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          REQUIRE_TOKEN: ${{ inputs.require-token }}
         run: |
           if [ -z "$SONAR_TOKEN" ]; then
+            if [ "$REQUIRE_TOKEN" = "true" ]; then
+              echo "::error title=SonarQube Pflicht::Secret SONAR_TOKEN fehlt. Auf Prod-Repos darf der Scan nicht übersprungen werden. Bei Dependabot-PRs muss es als Dependabot-Secret hinterlegt sein."
+              exit 1
+            fi
             echo "::warning title=SonarQube übersprungen::Secret SONAR_TOKEN fehlt. Scan wird übersprungen, bis es im Repo hinterlegt ist."
             echo "### SonarQube übersprungen" >> "$GITHUB_STEP_SUMMARY"
             echo "Secret \`SONAR_TOKEN\` ist nicht gesetzt." >> "$GITHUB_STEP_SUMMARY"
