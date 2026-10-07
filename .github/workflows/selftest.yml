@@ -95,3 +95,8 @@ jobs:
           : > /tmp/out; SONAR_TOKEN="" REQUIRE_TOKEN=false bash -e /tmp/check.sh; grep -qx "enabled=false" /tmp/out
           : > /tmp/out; SONAR_TOKEN=x REQUIRE_TOKEN=true bash -e /tmp/check.sh; grep -qx "enabled=true" /tmp/out
           echo "Tokenpflicht verhält sich korrekt"
+
+  docker-build:
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      context: test/fixtures/docker
