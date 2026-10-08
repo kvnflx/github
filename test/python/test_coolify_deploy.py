@@ -27,6 +27,7 @@ class World:
         self.broken_deploy = False
         self.rollback_outcome = "finished"
         self.status_404 = False
+        self.status_errors = 0
         self.head = NEW
         self.calls = []
         self.notifications = []
@@ -60,6 +61,9 @@ def make_handler(world):
                 return self._send(200, {"count": len(world.history), "deployments": world.history})
             if path.startswith("/api/v1/deployments/"):
                 uuid = path.rsplit("/", 1)[1]
+                if world.status_errors > 0:
+                    world.status_errors -= 1
+                    return self._send(502, {"message": "Bad Gateway"})
                 if world.status_404:
                     return self._send(404, {"message": "Not found"})
                 for dep in world.history:
@@ -152,11 +156,36 @@ class DeployTests(Base):
         self.assertNotIn("rollback", [c[0] for c in self.world.calls])
         self.assertIn("läuft unverändert weiter", notes[0][1])
 
-    def test_timeout_alte_version_laeuft(self):
+    def test_timeout_meldet_dringend(self):
+        # Coolify baut nach dem Timeout womöglich fertig und schaltet um, das darf nicht als
+        # "alte Version läuft weiter" gemeldet werden
         self.world.deploy_outcome = ("in_progress", NEW)
         code, notes = self.deploy()
+        self.assertEqual(code, 2)
+        self.assertEqual(notes[0][2], 5)
+        self.assertTrue(notes[0][0].startswith("Deployment hängt"))
+        self.assertNotIn("rollback", [c[0] for c in self.world.calls])
+
+    def test_anderer_commit_gebaut_sofort_erkannt(self):
+        other = "c" * 40
+        self.world.deploy_outcome = ("finished", other)
+        smoke_calls = []
+        orig = cd.smoke
+        cd.smoke = lambda *a, **k: smoke_calls.append(a[2]) or orig(*a, **k)
+        try:
+            code, notes = self.deploy()
+        finally:
+            cd.smoke = orig
         self.assertEqual(code, 1)
-        self.assertTrue(notes[0][0].startswith("Deploy fehlgeschlagen"))
+        self.assertIn(("rollback", OLD), self.world.calls)
+        self.assertNotIn(NEW, smoke_calls)
+        self.assertIn("ccccccc statt bbbbbbb", notes[0][1])
+
+    def test_transienter_fehler_wird_wiederholt(self):
+        self.world.status_errors = 2
+        code, notes = self.deploy()
+        self.assertEqual(code, 0)
+        self.assertEqual(notes, [])
 
     def test_erster_deploy_ohne_vorgaenger(self):
         self.world.history = []
