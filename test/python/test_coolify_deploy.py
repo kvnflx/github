@@ -34,84 +34,96 @@ class World:
         self.user_agents = set()
 
 
-def make_handler(world):
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):
-            pass  # Testausgabe ruhig halten
+class Handler(BaseHTTPRequestHandler):
+    """Fake-Server. Den Zustand liefert self.server.world."""
 
-        def _send(self, code, body, ctype="application/json"):
-            if ctype == "application/json":
-                data = json.dumps(body).encode()
-            else:
-                data = body.encode()
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+    @property
+    def world(self):
+        return self.server.world
 
-        def _body(self):
-            n = int(self.headers.get("Content-Length") or 0)
-            return json.loads(self.rfile.read(n)) if n else {}
+    def log_message(self, *args):
+        pass  # Testausgabe ruhig halten
 
-        def do_GET(self):
-            world.user_agents.add(self.headers.get("User-Agent"))
-            path = self.path.split("?")[0]
-            if path.startswith("/api/v1/deployments/applications/"):
-                return self._send(200, {"count": len(world.history), "deployments": world.history})
-            if path.startswith("/api/v1/deployments/"):
-                uuid = path.rsplit("/", 1)[1]
-                if world.status_errors > 0:
-                    world.status_errors -= 1
-                    return self._send(502, {"message": "Bad Gateway"})
-                if world.status_404:
-                    return self._send(404, {"message": "Not found"})
-                for dep in world.history:
-                    if dep["deployment_uuid"] == uuid:
-                        return self._send(200, dep)
-                return self._send(404, {"message": "Not found"})
-            if path.startswith("/repos/"):
-                return self._send(200, {"sha": world.head})
-            if path == "/version.txt":
-                return self._send(200, (world.live or "") + "\n", "text/plain")
-            if path == "/":
-                return self._send(200, f"<html><title>{world.keyword}</title></html>", "text/html")
-            return self._send(404, {})
+    def _send(self, code, body, ctype="application/json"):
+        data = json.dumps(body).encode() if ctype == "application/json" else body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
-        def do_POST(self):
-            world.user_agents.add(self.headers.get("User-Agent"))
-            path = self.path.split("?")[0]
-            body = self._body()
-            if path == "/api/v1/deploy":
-                world.calls.append(("deploy",))
-                status, commit = world.deploy_outcome
-                uuid = f"dep{len(world.history)}"
-                world.history.insert(0, {"deployment_uuid": uuid, "status": status, "commit": commit})
-                if status == "finished":
-                    world.live = commit
-                    if world.broken_deploy:
-                        world.keyword = "502 Bad Gateway"
-                return self._send(200, {"deployments": [{"message": "queued", "resource_uuid": "app", "deployment_uuid": uuid}]})
-            if path.endswith("/rollback"):
-                world.calls.append(("rollback", body["commit"]))
-                uuid = f"rb{len(world.history)}"
-                world.history.insert(0, {"deployment_uuid": uuid, "status": world.rollback_outcome, "commit": body["commit"]})
-                if world.rollback_outcome == "finished":
-                    world.live = body["commit"]
-                    world.keyword = "Barbershop"
-                return self._send(200, {"message": "queued", "deployment_uuid": uuid})
-            if path == "/":
-                world.notifications.append(body)
-                return self._send(200, {"id": "x"})
-            return self._send(404, {})
+    def _body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(n)) if n else {}
 
-    return Handler
+    def _deployment_status(self, path):
+        world = self.world
+        uuid = path.rsplit("/", 1)[1]
+        if world.status_errors > 0:
+            world.status_errors -= 1
+            return self._send(502, {"message": "Bad Gateway"})
+        if world.status_404:
+            return self._send(404, {"message": "Not found"})
+        found = next((dep for dep in world.history if dep["deployment_uuid"] == uuid), None)
+        return self._send(200, found) if found else self._send(404, {"message": "Not found"})
+
+    def do_GET(self):
+        world = self.world
+        world.user_agents.add(self.headers.get("User-Agent"))
+        path = self.path.split("?")[0]
+        if path.startswith("/api/v1/deployments/applications/"):
+            return self._send(200, {"count": len(world.history), "deployments": world.history})
+        if path.startswith("/api/v1/deployments/"):
+            return self._deployment_status(path)
+        if path.startswith("/repos/"):
+            return self._send(200, {"sha": world.head})
+        if path == "/version.txt":
+            return self._send(200, (world.live or "") + "\n", "text/plain")
+        if path == "/":
+            return self._send(200, f"<html><title>{world.keyword}</title></html>", "text/html")
+        return self._send(404, {})
+
+    def _deploy(self):
+        world = self.world
+        world.calls.append(("deploy",))
+        status, commit = world.deploy_outcome
+        uuid = f"dep{len(world.history)}"
+        world.history.insert(0, {"deployment_uuid": uuid, "status": status, "commit": commit})
+        if status == "finished":
+            world.live = commit
+            if world.broken_deploy:
+                world.keyword = "502 Bad Gateway"
+        return self._send(200, {"deployments": [{"message": "queued", "resource_uuid": "app", "deployment_uuid": uuid}]})
+
+    def _rollback(self, body):
+        world = self.world
+        world.calls.append(("rollback", body["commit"]))
+        uuid = f"rb{len(world.history)}"
+        world.history.insert(0, {"deployment_uuid": uuid, "status": world.rollback_outcome, "commit": body["commit"]})
+        if world.rollback_outcome == "finished":
+            world.live = body["commit"]
+            world.keyword = "Barbershop"
+        return self._send(200, {"message": "queued", "deployment_uuid": uuid})
+
+    def do_POST(self):
+        self.world.user_agents.add(self.headers.get("User-Agent"))
+        path = self.path.split("?")[0]
+        body = self._body()
+        if path == "/api/v1/deploy":
+            return self._deploy()
+        if path.endswith("/rollback"):
+            return self._rollback(body)
+        if path == "/":
+            self.world.notifications.append(body)
+            return self._send(200, {"id": "x"})
+        return self._send(404, {})
 
 
 class Base(unittest.TestCase):
     def setUp(self):
         self.world = World()
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.world))
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.world = self.world
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         self.api = cd.Coolify(self.url, "token", sleep=lambda s: None)
