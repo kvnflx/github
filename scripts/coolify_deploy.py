@@ -28,6 +28,13 @@ STATUS_OK = {"finished"}
 STATUS_FAILED = {"failed", "error", "cancelled", "cancelled-by-user"}
 
 
+def _is_transient(error):
+    """Kurzer Aussetzer (Netzwerk, 429, 5xx), bei dem ein neuer Versuch lohnt."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code == 429 or error.code >= 500
+    return True
+
+
 def _json_request(url, method="GET", body=None, headers=None, timeout=30):
     data = json.dumps(body).encode() if body is not None else None
     h = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -64,31 +71,28 @@ class Coolify:
     def rollback(self, app, commit):
         return self._call("POST", f"/applications/{app}/rollback", {"commit": commit})["deployment_uuid"]
 
+    def _find_deployment(self, app, deployment):
+        for dep in self.deployments(app):
+            if dep.get("deployment_uuid") == deployment:
+                return dep
+        return None
+
     def status(self, app, deployment, retries=3):
         # Kurze Aussetzer (502/429 von Cloudflare vor app.coolify.io) nicht als Abbruch werten
         for attempt in range(retries + 1):
             try:
                 return self._call("GET", f"/deployments/{deployment}").get("status")
-            except urllib.error.HTTPError as e:
-                if e.code == 404:
+            except urllib.error.URLError as e:  # HTTPError ist eine Unterklasse
+                if isinstance(e, urllib.error.HTTPError) and e.code == 404:
                     break
-                if (e.code < 500 and e.code != 429) or attempt == retries:
-                    raise
-            except urllib.error.URLError:
-                if attempt == retries:
+                if not _is_transient(e) or attempt == retries:
                     raise
             self.sleep(5)
         # Bekannter Coolify-Fehler: gerade beendete Deployments liefern 404, dann in der Liste suchen
-        for dep in self.deployments(app):
-            if dep.get("deployment_uuid") == deployment:
-                return dep.get("status")
-        return None
+        return (self._find_deployment(app, deployment) or {}).get("status")
 
     def deployment_commit(self, app, deployment):
-        for dep in self.deployments(app):
-            if dep.get("deployment_uuid") == deployment:
-                return dep.get("commit")
-        return None
+        return (self._find_deployment(app, deployment) or {}).get("commit")
 
     def wait(self, app, deployment, timeout=900, interval=10):
         """Liefert "finished", "failed" oder "timeout"."""
@@ -167,20 +171,34 @@ def run_deploy(a, api, notify_fn, latest_fn=None, sleep=time.sleep):
         notify_fn(f"Deployment hängt: {name}",
                   f"Deployment für {short} läuft nach {a.timeout // 60} min noch. Zustand von Hand prüfen: {a.url}", 5)
         return 2
-    deployed = result == "finished"
+    code, reason = _verify(a, api, notify_fn, deployment, result == "finished", previous, sleep)
+    if reason is None:
+        return code
+    return _roll_back(a, api, notify_fn, previous, reason, sleep)
+
+
+def _verify(a, api, notify_fn, deployment, deployed, previous, sleep):
+    """Prüft ein beendetes Deployment. Rückgabe (Exit-Code, None) = erledigt, (None, Grund) = Rollback nötig."""
+    name = a.name or a.app
+    short = a.sha[:7]
     built = api.deployment_commit(a.app, deployment) if deployed else None
     if deployed and built and built != a.sha:
         # Coolify baut immer den aktuellen Stand von main; ein neuerer Push kam dazwischen
-        reason = f"Coolify hat {built[:7]} statt {short} gebaut (neuerer Push, dessen eigener Lauf deployt erneut)"
-    elif deployed and smoke(a.url, a.keyword, a.sha, a.attempts, a.delay, sleep):
+        return None, f"Coolify hat {built[:7]} statt {short} gebaut (neuerer Push, dessen eigener Lauf deployt erneut)"
+    if deployed and smoke(a.url, a.keyword, a.sha, a.attempts, a.delay, sleep):
         print(f"{name}: {short} ist live")
-        return 0
-    elif not deployed and previous and smoke(a.url, a.keyword, previous, a.attempts, a.delay, sleep):
+        return 0, None
+    if not deployed and previous and smoke(a.url, a.keyword, previous, a.attempts, a.delay, sleep):
         notify_fn(f"Deploy fehlgeschlagen: {name}",
                   f"Build oder Deployment für {short} fehlgeschlagen. Die vorige Version {previous[:7]} läuft unverändert weiter.", 4)
-        return 1
-    else:
-        reason = "Smoke-Test fehlgeschlagen" if deployed else "Build oder Deployment fehlgeschlagen"
+        return 1, None
+    return None, "Smoke-Test fehlgeschlagen" if deployed else "Build oder Deployment fehlgeschlagen"
+
+
+def _roll_back(a, api, notify_fn, previous, reason, sleep):
+    """Zurück auf den Vorgänger, falls es einen gibt. Exit-Code 1 = zurückgerollt oder kein Vorgänger, 2 = gescheitert."""
+    name = a.name or a.app
+    short = a.sha[:7]
     print(f"{name}: {reason}")
     if not previous or previous == a.sha:
         notify_fn(f"Deploy fehlgeschlagen: {name}", f"{reason} für {short}. Kein Vorgänger für einen Rollback vorhanden.", 4)
